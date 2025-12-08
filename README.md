@@ -1,6 +1,34 @@
-# ATM Cash Logistics Optimizer
+# ATM Logistics Optimizer
 
 A Streamlit web application that optimizes cash logistics routes for ATM networks using Gurobi optimization solver.
+
+## 🎯 The Problem
+
+Banks lose millions in two ways:
+
+1. **Logistics:** Unnecessary armored truck trips ($500+ per stop).
+
+2. **Idle Capital:** Cash sitting in ATMs ($0 earnings) vs being invested.
+
+## 💡 The Solution (Prescriptive Analytics)
+
+I use **Mixed-Integer Linear Programming (MILP)** via the **Gurobi Solver** to find the mathematical global optimum.
+
+*   **Predictive Layer:** Generates daily demand scenarios.
+
+*   **Prescriptive Layer:**
+
+    *   Decision Variable $x_{ij}$: Binary decision to travel between location $i$ and $j$.
+
+    *   Constraint: Subtour elimination (Miller-Tucker-Zemlin formulation) ensures a valid single route.
+
+## 🚀 Usage
+
+1. Select "Safety Threshold" (e.g. refill if <$10k).
+
+2. Click "Optimize".
+
+3. The Gurobi engine solves the TSP (Traveling Salesperson Problem) in real-time.
 
 ## Features
 
