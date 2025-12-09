@@ -1,135 +1,144 @@
 import pandas as pd
 import numpy as np
-import random
 
 
-class ScenarioGenerator:
+# Google Sheets configuration
+SHEET_ID = '1SKtDtj3KX9WvE0n9iETiPS2IcNvKxSWiqhhcbqbp2xs'
+SHEET_NAME = 'Sheet1'
+
+
+def get_atm_data():
     """
-    Generates ATM locations and depot for optimization scenarios.
+    Read ATM data from Google Sheets and return a validated DataFrame.
+    
+    Returns:
+    --------
+    pd.DataFrame
+        DataFrame with columns: ID, lat, lon, current_cash, capacity, demand_forecast
+        Includes a DEPOT node at the centroid of all ATM locations
     """
+    # Construct the URL for CSV export from Google Sheets
+    url = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={SHEET_NAME}'
     
-    def __init__(self, center_lat=42.36, center_lon=-71.05, num_atms=15, seed=None):
-        """
-        Initialize the ScenarioGenerator.
-        
-        Parameters:
-        -----------
-        center_lat : float
-            Latitude of the center point (default: 42.36)
-        center_lon : float
-            Longitude of the center point (default: -71.05)
-        num_atms : int
-            Number of ATMs to generate (default: 15)
-        seed : int, optional
-            Random seed for reproducibility
-        """
-        self.center_lat = center_lat
-        self.center_lon = center_lon
-        self.num_atms = num_atms
-        if seed is not None:
-            random.seed(seed)
-            np.random.seed(seed)
-        self.df = None
-        self._generate_locations()
+    # Read data from Google Sheets
+    df = pd.read_csv(url)
     
-    def _generate_locations(self):
-        """
-        Generate ATM locations and depot, then create DataFrame.
-        """
-        locations = []
-        
-        # Generate ATMs around the center point
-        for i in range(1, self.num_atms + 1):
-            # Generate random offsets (in degrees, roughly 0-0.1 degrees ~ 0-11km)
-            # Using a radius of approximately 0.05 degrees (~5.5km)
-            angle = random.uniform(0, 2 * np.pi)
-            radius = random.uniform(0, 0.05)  # Roughly 0-5.5km from center
-            
-            lat = self.center_lat + radius * np.cos(angle)
-            lon = self.center_lon + radius * np.sin(angle)
-            
-            # Generate random attributes
-            current_cash = random.randint(5000, 50000)
-            capacity = 100000
-            demand_forecast = random.randint(2000, 5000)
-            
-            locations.append({
-                'ID': f'ATM_{i:02d}',
-                'lat': lat,
-                'lon': lon,
-                'current_cash': current_cash,
-                'capacity': capacity,
-                'demand_forecast': demand_forecast
-            })
-        
-        # Add DEPOT at the center
-        locations.append({
-            'ID': 'DEPOT',
-            'lat': self.center_lat,
-            'lon': self.center_lon,
-            'current_cash': 0,  # Depot typically doesn't have cash stored
-            'capacity': 0,
-            'demand_forecast': 0
-        })
-        
-        # Create DataFrame
-        self.df = pd.DataFrame(locations)
-        
-        # Reorder so DEPOT is first
-        depot_idx = self.df[self.df['ID'] == 'DEPOT'].index[0]
-        other_indices = self.df[self.df['ID'] != 'DEPOT'].index.tolist()
-        self.df = self.df.loc[[depot_idx] + other_indices].reset_index(drop=True)
+    # Convert column names to lowercase for consistent handling
+    df.columns = df.columns.str.lower()
     
-    def get_dataframe(self):
-        """
-        Return the locations as a Pandas DataFrame.
-        
-        Returns:
-        --------
-        pd.DataFrame
-            DataFrame with columns: ID, lat, lon, current_cash, capacity, demand_forecast
-        """
-        return self.df.copy()
+    # Expected columns (name/location_name is optional)
+    required_columns = ['atm_id', 'lat', 'lon', 'current_cash', 'capacity', 'demand_forecast']
     
-    def get_distance_matrix(self):
-        """
-        Calculate distance matrix between all nodes (ATMs + DEPOT) using Haversine formula.
+    # Validate that all required columns are present
+    missing_columns = set(required_columns) - set(df.columns)
+    if missing_columns:
+        raise ValueError(f"Missing required columns: {missing_columns}. "
+                        f"Found columns: {list(df.columns)}")
+    
+    # Select required columns and name/location_name if present
+    columns_to_select = required_columns.copy()
+    if 'name' in df.columns:
+        columns_to_select.append('name')
+    elif 'location_name' in df.columns:
+        columns_to_select.append('location_name')
+    
+    df = df[columns_to_select].copy()
+    
+    # Force numeric types for numeric columns (handle dirty data)
+    numeric_columns = ['lat', 'lon', 'current_cash', 'capacity', 'demand_forecast']
+    for col in numeric_columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # Drop rows with missing critical values (NaNs from coercion)
+    df = df.dropna(subset=['atm_id', 'lat', 'lon'])
+    
+    # Rename atm_id to ID for compatibility with rest of codebase
+    df = df.rename(columns={'atm_id': 'ID'})
+    
+    # Check if DEPOT already exists in the data
+    if 'DEPOT' in df['ID'].values:
+        # DEPOT already exists, ensure it's at the beginning
+        depot_mask = df['ID'] == 'DEPOT'
+        depot_row = df[depot_mask].copy()
+        atm_rows = df[~depot_mask].copy()
+        df = pd.concat([depot_row, atm_rows], ignore_index=True)
+    else:
+        # Add DEPOT node at the centroid of all ATM locations
+        # DEPOT represents the central warehouse/starting point
+        atm_df = df  # All rows are ATMs if no DEPOT exists
+        avg_lat = atm_df['lat'].mean()
+        avg_lon = atm_df['lon'].mean()
         
-        Returns:
-        --------
-        np.ndarray
-            Distance matrix where element [i, j] is the great-circle distance
-            between node i and node j in miles
-        """
-        if self.df is None:
-            raise ValueError("Locations not generated. Call _generate_locations() first.")
+        # Build depot row with same columns as df
+        depot_data = {
+            'ID': ['DEPOT'],
+            'lat': [avg_lat],
+            'lon': [avg_lon],
+            'current_cash': [0],  # Depot has no cash (it's a warehouse)
+            'capacity': [0],  # Not applicable for depot
+            'demand_forecast': [0]  # Depot has no demand (it supplies cash)
+        }
         
-        n = len(self.df)
-        distance_matrix = np.zeros((n, n))
+        # Add name/location_name if it exists in the dataframe
+        if 'name' in df.columns:
+            depot_data['name'] = ['Central Distribution Warehouse']
+        elif 'location_name' in df.columns:
+            depot_data['location_name'] = ['Central Distribution Warehouse']
         
-        # Earth's radius in miles
-        R = 3959.0
+        depot_row = pd.DataFrame(depot_data)
         
-        for i in range(n):
-            for j in range(n):
-                if i == j:
-                    distance_matrix[i, j] = 0.0
-                else:
-                    lat1, lon1 = self.df.iloc[i]['lat'], self.df.iloc[i]['lon']
-                    lat2, lon2 = self.df.iloc[j]['lat'], self.df.iloc[j]['lon']
-                    
-                    # Convert latitude and longitude from degrees to radians
-                    phi1 = np.radians(lat1)
-                    phi2 = np.radians(lat2)
-                    delta_phi = np.radians(lat2 - lat1)
-                    delta_lambda = np.radians(lon2 - lon1)
-                    
-                    # Haversine formula
-                    a = np.sin(delta_phi / 2)**2 + np.cos(phi1) * np.cos(phi2) * np.sin(delta_lambda / 2)**2
-                    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
-                    
-                    # Distance in miles
-                    distance_matrix[i, j] = R * c
-        
-        return distance_matrix
+        # Prepend DEPOT to the beginning of the dataframe
+        df = pd.concat([depot_row, df], ignore_index=True)
+    
+    return df
 
+
+def get_distance_matrix(df):
+    """
+    Calculate distance matrix between all nodes using Haversine formula.
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        DataFrame containing node information with columns: lat, lon
+    
+    Returns:
+    --------
+    np.ndarray
+        Distance matrix where element [i, j] is the great-circle distance
+        between node i and node j in miles
+    """
+    if df is None or len(df) == 0:
+        raise ValueError("DataFrame is empty or None.")
+    
+    if 'lat' not in df.columns or 'lon' not in df.columns:
+        raise ValueError("DataFrame must contain 'lat' and 'lon' columns.")
+    
+    n = len(df)
+    distance_matrix = np.zeros((n, n))
+    
+    # Earth's radius in miles
+    R = 3959.0
+    
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                distance_matrix[i, j] = 0.0
+            else:
+                lat1, lon1 = df.iloc[i]['lat'], df.iloc[i]['lon']
+                lat2, lon2 = df.iloc[j]['lat'], df.iloc[j]['lon']
+                
+                # Convert latitude and longitude from degrees to radians
+                phi1 = np.radians(lat1)
+                phi2 = np.radians(lat2)
+                delta_phi = np.radians(lat2 - lat1)
+                delta_lambda = np.radians(lon2 - lon1)
+                
+                # Haversine formula
+                a = np.sin(delta_phi / 2)**2 + np.cos(phi1) * np.cos(phi2) * np.sin(delta_lambda / 2)**2
+                c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+                
+                # Distance in miles
+                distance_matrix[i, j] = R * c
+    
+    return distance_matrix

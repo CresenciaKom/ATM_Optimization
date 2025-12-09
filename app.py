@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import folium
 from streamlit_folium import st_folium
-from data_manager import ScenarioGenerator
+from data_manager import get_atm_data, get_distance_matrix
 from optimizer import GurobiRouteSolver
 
 
@@ -22,9 +22,9 @@ if 'optimization_result' not in st.session_state:
 def generate_scenario():
     """Generate or retrieve scenario data."""
     if st.session_state.scenario_data is None:
-        generator = ScenarioGenerator(seed=42)
-        st.session_state.scenario_data = generator.get_dataframe()
-        st.session_state.distance_matrix = generator.get_distance_matrix()
+        df = get_atm_data()
+        st.session_state.scenario_data = df
+        st.session_state.distance_matrix = get_distance_matrix(df)
     return st.session_state.scenario_data, st.session_state.distance_matrix
 
 
@@ -178,9 +178,21 @@ if optimize_button or st.session_state.optimization_result is not None:
                 orig_j = original_indices[j]
                 filtered_distance_matrix[i, j] = distance_matrix[orig_i, orig_j]
         
-        # Solve optimization
-        solver = GurobiRouteSolver(filtered_df, filtered_distance_matrix)
-        optimized_route = solver.solve()
+        # Validate data before optimization
+        solver = None
+        optimized_route = None
+        
+        if len(filtered_df) < 2:
+            st.warning("⚠️ No ATMs to visit. All ATMs are above the safety threshold.")
+            st.session_state.optimization_result = None
+        else:
+            try:
+                # Solve optimization
+                solver = GurobiRouteSolver(filtered_df, filtered_distance_matrix)
+                optimized_route = solver.solve()
+            except Exception as e:
+                st.error(f"❌ Optimization error: {str(e)}")
+                st.session_state.optimization_result = None
         
         if optimized_route:
             # Calculate optimized route distance
@@ -203,7 +215,31 @@ if optimize_button or st.session_state.optimization_result is not None:
                 'cost_saved': cost_saved
             }
         else:
-            st.error("Optimization failed. Please check the model constraints.")
+            # Display detailed error message if available
+            if solver is not None and hasattr(solver, 'error_message') and solver.error_message:
+                # Format error message for Streamlit (convert \n to proper display)
+                error_lines = solver.error_message.split('\n')
+                st.error(f"❌ {error_lines[0]}")
+                if len(error_lines) > 1:
+                    for line in error_lines[1:]:
+                        if line.strip():
+                            st.write(f"   {line}")
+            else:
+                st.error("❌ Optimization failed. Please check the model constraints.")
+            
+            # Show diagnostic information
+            with st.expander("🔍 Diagnostic Information"):
+                st.write(f"**Nodes in optimization:** {len(filtered_df)}")
+                st.write(f"- DEPOT: 1")
+                st.write(f"- ATMs to visit: {len(filtered_df) - 1}")
+                if len(filtered_df) > 1:
+                    st.write(f"\n**Sample data:**")
+                    st.dataframe(filtered_df[['ID', 'current_cash', 'demand_forecast']].head())
+                    st.write(f"\n**Demand forecast stats:**")
+                    st.write(f"- Min: ${filtered_df['demand_forecast'].min():,.2f}")
+                    st.write(f"- Max: ${filtered_df['demand_forecast'].max():,.2f}")
+                    st.write(f"- Mean: ${filtered_df['demand_forecast'].mean():,.2f}")
+                    st.write(f"- Has NaN: {filtered_df['demand_forecast'].isna().any()}")
             st.session_state.optimization_result = None
 
 # Display results

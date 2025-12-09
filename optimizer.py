@@ -31,6 +31,7 @@ class GurobiRouteSolver:
         self.x = None  # Binary variables x[i,j]
         self.u = None  # Continuous variables u[i]
         self.solution_route = None
+        self.error_message = None  # Store error messages
     
     def _preprocess(self):
         """
@@ -39,6 +40,24 @@ class GurobiRouteSolver:
         # Keep DEPOT and ATMs with low stock
         mask = (self.original_df['ID'] == 'DEPOT') | (self.original_df['current_cash'] < 20000)
         self.df = self.original_df[mask].copy().reset_index(drop=True)
+        
+        # Validate: Must have DEPOT
+        if 'DEPOT' not in self.df['ID'].values:
+            raise ValueError("DEPOT node not found in dataframe")
+        
+        # Validate: Need at least one ATM to visit (DEPOT + at least 1 ATM)
+        if len(self.df) < 2:
+            raise ValueError("Need at least one ATM to visit (only DEPOT found)")
+        
+        # Validate: Check for NaN values in demand_forecast
+        if self.df['demand_forecast'].isna().any():
+            # Fill NaN values with 0 for ATMs (depot should already be 0)
+            self.df['demand_forecast'] = self.df['demand_forecast'].fillna(0)
+        
+        # Ensure demand_forecast is numeric and non-negative
+        self.df['demand_forecast'] = pd.to_numeric(self.df['demand_forecast'], errors='coerce').fillna(0)
+        # Ensure non-negative (negative demand doesn't make sense)
+        self.df['demand_forecast'] = self.df['demand_forecast'].clip(lower=0)
         
         # Get indices of filtered nodes in original dataframe
         original_indices = self.original_df[mask].index.tolist()
@@ -91,6 +110,10 @@ class GurobiRouteSolver:
         )
         
         # Constraints
+        
+        # 0. Prevent self-loops: x[i,i] = 0 for all i
+        for i in range(self.n):
+            self.model.addConstr(self.x[i, i] == 0, name=f'no_self_loop_{i}')
         
         # 1. Assignment: Each chosen ATM must be visited exactly once
         # (excluding depot from the "exactly once" constraint)
@@ -163,9 +186,32 @@ class GurobiRouteSolver:
             self.solution_route = self._extract_route()
             return self.solution_route
         else:
-            print(f"Optimization status: {self.model.status}")
+            # Provide detailed error information
+            status_map = {
+                GRB.LOADED: "Model is loaded but not yet optimized",
+                GRB.OPTIMAL: "Optimal solution found",
+                GRB.INFEASIBLE: "Model is infeasible - constraints conflict with each other",
+                GRB.INF_OR_UNBD: "Model is infeasible or unbounded",
+                GRB.UNBOUNDED: "Model is unbounded",
+                GRB.CUTOFF: "Optimal objective was worse than cutoff",
+                GRB.ITERATION_LIMIT: "Optimization stopped at iteration limit",
+                GRB.NODE_LIMIT: "Optimization stopped at node limit",
+                GRB.TIME_LIMIT: "Optimization stopped at time limit",
+                GRB.SOLUTION_LIMIT: "Optimization stopped at solution limit",
+                GRB.INTERRUPTED: "Optimization was interrupted",
+                GRB.NUMERIC: "Numerical issues encountered",
+                GRB.SUBOPTIMAL: "Suboptimal solution found",
+                GRB.INPROGRESS: "Optimization is in progress"
+            }
+            error_msg = status_map.get(self.model.status, f"Unknown status: {self.model.status}")
+            self.error_message = f"Optimization failed: {error_msg}"
             if self.model.status == GRB.INFEASIBLE:
-                print("Model is infeasible. Try relaxing constraints.")
+                self.error_message += "\n\nPossible causes:\n"
+                self.error_message += "  - No valid route exists with current constraints\n"
+                self.error_message += "  - Data inconsistencies (check for NaN or invalid values)\n"
+                self.error_message += "  - Only DEPOT node present (need at least one ATM to visit)\n"
+                self.error_message += f"  - Current nodes: {len(self.df)} (DEPOT + {len(self.df) - 1} ATMs)"
+            print(self.error_message)
             return None
     
     def _extract_route(self):
