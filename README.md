@@ -75,4 +75,4 @@ With more development time, this product could expand to:
 
 ## 🎬 Demo Video
 
-[Watch the 3-minute walkthrough →]([YOUR LOOM LINK HERE])
+[Watch the 3-minute walkthrough →]([https://www.loom.com/share/c1777fdf481d453b93024b5e9877fa37])
