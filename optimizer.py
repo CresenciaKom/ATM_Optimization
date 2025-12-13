@@ -7,19 +7,36 @@ import pandas as pd
 class GurobiRouteSolver:
     """
     Solves the cash logistics routing problem using Gurobi optimizer.
+    
+    This class formulates and solves a Traveling Salesman Problem (TSP) variant
+    for ATM cash replenishment. The optimization minimizes total travel distance
+    while ensuring all low-stock ATMs are visited exactly once, starting and
+    ending at the depot.
+    
+    Methodology:
+        Uses Mixed Integer Linear Programming (MILP) with Miller-Tucker-Zemlin
+        (MTZ) constraints for subtour elimination. The model uses binary decision
+        variables to represent route segments and continuous variables for MTZ
+        formulation.
     """
     
     def __init__(self, dataframe, distance_matrix):
         """
         Initialize the solver with ATM data and distance matrix.
         
-        Parameters:
-        -----------
-        dataframe : pd.DataFrame
-            DataFrame containing ATM information with columns:
-            ID, lat, lon, current_cash, capacity, demand_forecast
-        distance_matrix : np.ndarray
-            Distance matrix between all nodes (in miles)
+        Args:
+            dataframe (pd.DataFrame): DataFrame containing ATM information with
+                columns: ID, lat, lon, current_cash, capacity, demand_forecast.
+                Must include a DEPOT node.
+            distance_matrix (np.ndarray): Square distance matrix between all nodes
+                in miles. Element [i, j] represents the distance from node i to
+                node j.
+        
+        Returns:
+            None
+        
+        Raises:
+            ValueError: If DEPOT node is missing or insufficient nodes exist.
         """
         self.original_df = dataframe.copy()
         self.original_distance_matrix = distance_matrix.copy()
@@ -36,6 +53,21 @@ class GurobiRouteSolver:
     def _preprocess(self):
         """
         Filter data to include only DEPOT + ATMs with current_cash < 20,000.
+        
+        Methodology:
+            Filters the original dataframe to include only the depot and ATMs
+            with cash levels below the threshold. Creates a corresponding filtered
+            distance matrix. Validates data integrity and handles missing values
+            in demand forecasts.
+        
+        Args:
+            None (uses self.original_df and self.original_distance_matrix)
+        
+        Returns:
+            None (modifies self.df, self.distance_matrix, self.depot_idx, self.n)
+        
+        Raises:
+            ValueError: If DEPOT is missing or insufficient nodes exist.
         """
         # Keep DEPOT and ATMs with low stock
         mask = (self.original_df['ID'] == 'DEPOT') | (self.original_df['current_cash'] < 20000)
@@ -78,14 +110,26 @@ class GurobiRouteSolver:
     
     def build_model(self):
         """
-        Build the Gurobi optimization model.
+        Build the Gurobi optimization model with decision variables and constraints.
+        
+        Methodology:
+            Constructs a Mixed Integer Linear Programming (MILP) model for the
+            Traveling Salesman Problem. Uses binary variables for route decisions
+            and continuous variables for Miller-Tucker-Zemlin (MTZ) subtour
+            elimination constraints. The objective minimizes total travel distance.
+        
+        Args:
+            None (uses self.df, self.distance_matrix, self.depot_idx, self.n)
+        
+        Returns:
+            None (creates self.model, self.x, self.u)
         """
         # Initialize model
         self.model = gp.Model('Cash_Logistics')
         self.model.setParam('OutputFlag', 1)  # Show solver output
         
-        # Variables
-        # x[i,j]: Binary variable, 1 if truck goes from node i to j
+        # Decision Variables
+        # x[i,j]: Binary variable, 1 if truck travels from node i to node j, 0 otherwise
         self.x = self.model.addVars(
             self.n, self.n,
             vtype=GRB.BINARY,
@@ -93,13 +137,15 @@ class GurobiRouteSolver:
         )
         
         # u[i]: Continuous variable for MTZ subtour elimination
+        # Represents the cumulative "load" or "position" in the route sequence
         self.u = self.model.addVars(
             self.n,
             vtype=GRB.CONTINUOUS,
             name='u'
         )
         
-        # Objective: Minimize total distance (in miles)
+        # Objective Function: Minimize total distance traveled (in miles)
+        # Sum of all edge distances multiplied by binary route variables
         self.model.setObjective(
             gp.quicksum(
                 self.distance_matrix[i, j] * self.x[i, j]
@@ -109,28 +155,37 @@ class GurobiRouteSolver:
             GRB.MINIMIZE
         )
         
-        # Constraints
+        # ========================================================================
+        # CONSTRAINTS
+        # ========================================================================
         
-        # 0. Prevent self-loops: x[i,i] = 0 for all i
+        # Constraint 0: Prevent self-loops
+        # Mathematical: x[i,i] = 0 for all i
+        # Logic: Truck cannot travel from a node to itself
         for i in range(self.n):
             self.model.addConstr(self.x[i, i] == 0, name=f'no_self_loop_{i}')
         
-        # 1. Assignment: Each chosen ATM must be visited exactly once
-        # (excluding depot from the "exactly once" constraint)
+        # Constraint 1: Flow conservation for ATMs (excluding depot)
+        # Mathematical: Σ_i x[i,j] = 1 and Σ_i x[j,i] = 1 for all ATM nodes j
+        # Logic: Each ATM must have exactly one incoming edge and one outgoing edge
+        #        This ensures every ATM is visited exactly once
         for j in range(self.n):
             if j != self.depot_idx:  # Skip depot
-                # Exactly one incoming edge
+                # Exactly one incoming edge (flow into node j)
                 self.model.addConstr(
                     gp.quicksum(self.x[i, j] for i in range(self.n) if i != j) == 1,
                     name=f'incoming_{j}'
                 )
-                # Exactly one outgoing edge
+                # Exactly one outgoing edge (flow out of node j)
                 self.model.addConstr(
                     gp.quicksum(self.x[j, i] for i in range(self.n) if i != j) == 1,
                     name=f'outgoing_{j}'
                 )
         
-        # 2. Depot: Truck must leave the depot and return to the depot
+        # Constraint 2: Depot flow constraints
+        # Mathematical: Σ_j x[depot,j] = 1 and Σ_i x[i,depot] = 1
+        # Logic: Truck must leave depot exactly once and return to depot exactly once
+        #        This ensures the route starts and ends at the depot
         # Exactly one edge leaving depot
         self.model.addConstr(
             gp.quicksum(self.x[self.depot_idx, j] for j in range(self.n) if j != self.depot_idx) == 1,
@@ -142,25 +197,32 @@ class GurobiRouteSolver:
             name='depot_in'
         )
         
-        # 3. Subtour Elimination (MTZ): u[i] - u[j] + Q * x[i,j] <= Q - q[j]
-        # Q is capacity (using a reasonable vehicle capacity)
-        # q[j] is demand_forecast at node j
+        # Constraint 3: Subtour Elimination using Miller-Tucker-Zemlin (MTZ) method
+        # Mathematical: u[i] - u[j] + Q * x[i,j] <= Q - q[j] for all i,j (i≠j, j≠depot)
+        #               where Q = vehicle capacity, q[j] = demand at node j
+        # Logic: If edge (i,j) is used (x[i,j]=1), then u[j] >= u[i] + q[j]
+        #        This creates an ordering that prevents disconnected subtours
+        #        The u variables represent cumulative load/position in the route
         Q = 100000  # Vehicle capacity (can be adjusted)
         
         for i in range(self.n):
             for j in range(self.n):
                 if i != j and j != self.depot_idx:  # Skip self-loops and depot as destination
                     q_j = self.df.iloc[j]['demand_forecast']
+                    # MTZ constraint: ensures proper sequencing and prevents subtours
                     self.model.addConstr(
                         self.u[i] - self.u[j] + Q * self.x[i, j] <= Q - q_j,
                         name=f'mtz_{i}_{j}'
                     )
         
-        # Set bounds for u variables (for MTZ)
-        # u[depot] = 0
+        # Constraint 4: MTZ variable bounds
+        # Mathematical: u[depot] = 0
+        # Logic: Depot is the starting point, so its position/load is zero
         self.model.addConstr(self.u[self.depot_idx] == 0, name='u_depot')
         
-        # u[i] >= q[i] for all nodes (except depot)
+        # Mathematical: u[i] >= q[i] for all nodes (except depot)
+        # Logic: Each node's position must be at least its demand value
+        #        This ensures proper ordering and prevents negative loads
         for i in range(self.n):
             if i != self.depot_idx:
                 q_i = self.df.iloc[i]['demand_forecast']
@@ -168,12 +230,19 @@ class GurobiRouteSolver:
     
     def solve(self):
         """
-        Solve the optimization model.
+        Solve the optimization model using Gurobi solver.
+        
+        Methodology:
+            Calls Gurobi's optimizer to solve the MILP model. If optimal solution
+            is found, extracts the route sequence. Otherwise, provides detailed
+            error information for debugging infeasible or unbounded models.
+        
+        Args:
+            None (uses self.model)
         
         Returns:
-        --------
-        list
-            Sequence of stops (route) as a list of ATM IDs
+            list: Sequence of stops (route) as a list of ATM IDs, starting and
+                ending with 'DEPOT'. Returns None if optimization fails.
         """
         if self.model is None:
             self.build_model()
@@ -216,12 +285,19 @@ class GurobiRouteSolver:
     
     def _extract_route(self):
         """
-        Extract the route sequence from the solution.
+        Extract the route sequence from the optimal solution.
+        
+        Methodology:
+            Traverses the solution graph starting from the depot, following
+            active edges (where x[i,j] = 1) until returning to the depot.
+            Constructs the ordered list of node IDs visited.
+        
+        Args:
+            None (uses self.model, self.x, self.df, self.depot_idx)
         
         Returns:
-        --------
-        list
-            List of ATM IDs in the order of the route
+            list: List of ATM IDs in the order of the route, starting and ending
+                with 'DEPOT'. Returns None if solution is not optimal.
         """
         if self.model.status != GRB.OPTIMAL:
             return None
@@ -252,12 +328,14 @@ class GurobiRouteSolver:
     
     def get_route(self):
         """
-        Get the solution route.
+        Get the solution route from the solved model.
+        
+        Args:
+            None (uses self.solution_route)
         
         Returns:
-        --------
-        list
-            Sequence of stops (route) as a list of ATM IDs
+            list: Sequence of stops (route) as a list of ATM IDs, or None if
+                no solution exists.
         """
         return self.solution_route
 

@@ -20,7 +20,22 @@ if 'optimization_result' not in st.session_state:
 
 
 def generate_scenario():
-    """Generate or retrieve scenario data."""
+    """
+    Generate or retrieve scenario data from session state or Google Sheets.
+    
+    Methodology:
+        Checks session state for cached data. If not present, fetches ATM data
+        from Google Sheets and calculates distance matrix. Caches results in
+        session state to avoid redundant API calls.
+    
+    Args:
+        None (uses st.session_state)
+    
+    Returns:
+        tuple: (pd.DataFrame, np.ndarray) containing:
+            - DataFrame with ATM data including DEPOT
+            - Distance matrix between all nodes in miles
+    """
     if st.session_state.scenario_data is None:
         df = get_atm_data()
         st.session_state.scenario_data = df
@@ -29,7 +44,23 @@ def generate_scenario():
 
 
 def calculate_route_distance(route_ids, df, distance_matrix):
-    """Calculate total distance for a route given node IDs."""
+    """
+    Calculate total distance for a route given node IDs.
+    
+    Methodology:
+        Iterates through consecutive pairs of nodes in the route and sums
+        the corresponding distances from the distance matrix.
+    
+    Args:
+        route_ids (list): List of node IDs in route order (e.g., ['DEPOT', 'ATM1', 'ATM2', 'DEPOT']).
+        df (pd.DataFrame): DataFrame containing node information with 'ID' column.
+        distance_matrix (np.ndarray): Square distance matrix where [i,j] is distance
+            from node at index i to node at index j in miles.
+    
+    Returns:
+        float: Total distance traveled along the route in miles. Returns 0 if
+            route has fewer than 2 nodes.
+    """
     if len(route_ids) < 2:
         return 0
     
@@ -43,7 +74,24 @@ def calculate_route_distance(route_ids, df, distance_matrix):
 
 
 def generate_random_route(df, distance_matrix, depot_id='DEPOT'):
-    """Generate a random route visiting all low-stock ATMs."""
+    """
+    Generate a random route visiting all low-stock ATMs.
+    
+    Methodology:
+        Creates a baseline comparison route by randomly shuffling ATM nodes
+        (excluding depot) and inserting depot at the start and end. This
+        provides a naive routing strategy for comparison with optimized routes.
+    
+    Args:
+        df (pd.DataFrame): DataFrame containing node information with 'ID' column.
+        distance_matrix (np.ndarray): Distance matrix (not used in this function
+            but kept for API consistency).
+        depot_id (str): ID of the depot node. Defaults to 'DEPOT'.
+    
+    Returns:
+        list: Route as a list of node IDs, starting and ending with depot_id.
+            If no ATMs exist, returns [depot_id].
+    """
     # Get all nodes except depot
     nodes = df[df['ID'] != depot_id]['ID'].tolist()
     
@@ -59,7 +107,25 @@ def generate_random_route(df, distance_matrix, depot_id='DEPOT'):
 
 
 def create_map(df, route=None, threshold=20000):
-    """Create a folium map with ATMs and route."""
+    """
+    Create a folium map with ATMs and route visualization.
+    
+    Methodology:
+        Creates an interactive Folium map centered on the depot. Adds markers
+        for each ATM (color-coded by cash level) and optionally draws a polyline
+        representing the optimized route.
+    
+    Args:
+        df (pd.DataFrame): DataFrame containing ATM information with columns:
+            ID, lat, lon, current_cash, demand_forecast. Must include a DEPOT node.
+        route (list, optional): List of node IDs in route order. If provided,
+            draws a polyline connecting the nodes. Defaults to None.
+        threshold (float): Cash threshold in dollars. ATMs below this threshold
+            are marked as low-stock (red). Defaults to 20000.
+    
+    Returns:
+        folium.Map: Interactive Folium map object with markers and optional route.
+    """
     # Center map on depot
     depot = df[df['ID'] == 'DEPOT'].iloc[0]
     center_lat, center_lon = depot['lat'], depot['lon']

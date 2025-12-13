@@ -11,11 +11,22 @@ def get_atm_data():
     """
     Read ATM data from Google Sheets and return a validated DataFrame.
     
+    Methodology:
+        Fetches data from Google Sheets via CSV export URL. Validates required
+        columns, handles missing values, and ensures numeric types. Creates a
+        DEPOT node at the geographic centroid of all ATM locations if one doesn't
+        already exist.
+    
+    Args:
+        None (uses SHEET_ID and SHEET_NAME module constants)
+    
     Returns:
-    --------
-    pd.DataFrame
-        DataFrame with columns: ID, lat, lon, current_cash, capacity, demand_forecast
-        Includes a DEPOT node at the centroid of all ATM locations
+        pd.DataFrame: DataFrame with columns: ID, lat, lon, current_cash, capacity,
+            demand_forecast. Includes a DEPOT node at the centroid of all ATM
+            locations. DEPOT is always the first row.
+    
+    Raises:
+        ValueError: If required columns are missing from the Google Sheets data.
     """
     # Construct the URL for CSV export from Google Sheets
     url = f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={SHEET_NAME}'
@@ -97,16 +108,27 @@ def get_distance_matrix(df):
     """
     Calculate distance matrix between all nodes using Haversine formula.
     
-    Parameters:
-    -----------
-    df : pd.DataFrame
-        DataFrame containing node information with columns: lat, lon
+    Methodology:
+        Uses the Haversine formula to compute great-circle distances between
+        geographic coordinates. The formula accounts for Earth's curvature
+        and provides accurate distance calculations for points on a sphere.
+        Formula: a = sin²(Δφ/2) + cos(φ1) * cos(φ2) * sin²(Δλ/2)
+                 c = 2 * atan2(√a, √(1-a))
+                 distance = R * c
+        where φ is latitude, λ is longitude, R is Earth's radius in miles.
+    
+    Args:
+        df (pd.DataFrame): DataFrame containing node information with columns:
+            lat (latitude in degrees), lon (longitude in degrees). Must have
+            at least one row.
     
     Returns:
-    --------
-    np.ndarray
-        Distance matrix where element [i, j] is the great-circle distance
-        between node i and node j in miles
+        np.ndarray: Square distance matrix where element [i, j] is the
+            great-circle distance between node i and node j in miles.
+            Diagonal elements are zero (distance from node to itself).
+    
+    Raises:
+        ValueError: If DataFrame is empty, None, or missing required columns.
     """
     if df is None or len(df) == 0:
         raise ValueError("DataFrame is empty or None.")
@@ -123,22 +145,30 @@ def get_distance_matrix(df):
     for i in range(n):
         for j in range(n):
             if i == j:
+                # Distance from node to itself is zero
                 distance_matrix[i, j] = 0.0
             else:
+                # Extract coordinates for node pair
                 lat1, lon1 = df.iloc[i]['lat'], df.iloc[i]['lon']
                 lat2, lon2 = df.iloc[j]['lat'], df.iloc[j]['lon']
                 
                 # Convert latitude and longitude from degrees to radians
-                phi1 = np.radians(lat1)
-                phi2 = np.radians(lat2)
-                delta_phi = np.radians(lat2 - lat1)
-                delta_lambda = np.radians(lon2 - lon1)
+                # Required for trigonometric functions in Haversine formula
+                phi1 = np.radians(lat1)  # Latitude of node i
+                phi2 = np.radians(lat2)  # Latitude of node j
+                delta_phi = np.radians(lat2 - lat1)  # Difference in latitude
+                delta_lambda = np.radians(lon2 - lon1)  # Difference in longitude
                 
-                # Haversine formula
+                # Haversine formula: computes great-circle distance on a sphere
+                # a = sin²(Δφ/2) + cos(φ1) * cos(φ2) * sin²(Δλ/2)
+                # This calculates the square of half the chord length between points
                 a = np.sin(delta_phi / 2)**2 + np.cos(phi1) * np.cos(phi2) * np.sin(delta_lambda / 2)**2
+                
+                # c = 2 * atan2(√a, √(1-a))
+                # Converts chord length to angular distance in radians
                 c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
                 
-                # Distance in miles
+                # Distance = R * c (where R is Earth's radius in miles)
                 distance_matrix[i, j] = R * c
     
     return distance_matrix
