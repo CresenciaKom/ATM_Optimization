@@ -73,4 +73,4 @@ With more development time, this product could expand to:
 1.  **Multi-Vehicle Support:** expanding from TSP to m-VRP (managing a fleet of 5+ trucks).
 2.  **Time Windows:** Adding constraints for ATMs that are only accessible during business hours (e.g., inside malls).
 
-## 🎬 Demo Video: [Watch the 5-minute walkthrough →]([https://www.loom.com/share/c1777fdf481d453b93024b5e9877fa37])
+## 🎬 Demo Video: [Watch the 5-minute walkthrough →](https://www.loom.com/share/c1777fdf481d453b93024b5e9877fa37)
