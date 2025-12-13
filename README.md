@@ -24,8 +24,8 @@ I used **Mixed-Integer Linear Programming (MILP)** to solve the **Capacitated Ve
 
 **[Try the Optimizer Here →](https://atmoptimization-nw5qb73e4mw4pp4gvdmvfw.streamlit.app/)**
 
-![Dashboard Screenshot](<img width="1886" height="754" alt="image" src="https://github.com/user-attachments/assets/eb0b946f-0cae-483c-b7d4-141c70e40d6f" />
-)
+[Dashboard Screenshot]  <img width="732" height="413" alt="Dashboard Screenshot" src="https://github.com/user-attachments/assets/090fca64-3aba-4ab6-9843-21e67d15f80d" />
+
 
 ## ⚙️ How It Works
 
@@ -73,6 +73,4 @@ With more development time, this product could expand to:
 1.  **Multi-Vehicle Support:** expanding from TSP to m-VRP (managing a fleet of 5+ trucks).
 2.  **Time Windows:** Adding constraints for ATMs that are only accessible during business hours (e.g., inside malls).
 
-## 🎬 Demo Video
-
-[Watch the 5-minute walkthrough →]([https://www.loom.com/share/c1777fdf481d453b93024b5e9877fa37])
+## 🎬 Demo Video: [Watch the 5-minute walkthrough →]([https://www.loom.com/share/c1777fdf481d453b93024b5e9877fa37])
