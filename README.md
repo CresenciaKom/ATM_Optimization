@@ -28,7 +28,8 @@ https://docs.google.com/spreadsheets/d/1SKtDtj3KX9WvE0n9iETiPS2IcNvKxSWiqhhcbqbp
 
 **[Try the Optimizer Here →](https://atmoptimization-nw5qb73e4mw4pp4gvdmvfw.streamlit.app/)**
 
-[Dashboard Screenshot]  <img width="732" height="413" alt="Dashboard Screenshot" src="https://github.com/user-attachments/assets/090fca64-3aba-4ab6-9843-21e67d15f80d" />
+[Dashboard Screenshot]  
+<img width="732" height="413" alt="Dashboard Screenshot" src="https://github.com/user-attachments/assets/090fca64-3aba-4ab6-9843-21e67d15f80d" />
 
 
 ## ⚙️ How It Works
