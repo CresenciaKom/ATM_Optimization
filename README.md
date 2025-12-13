@@ -21,7 +21,7 @@ I used **Mixed-Integer Linear Programming (MILP)** to solve the **Capacitated Ve
 3.  Minimizes the total travel distance using Haversine (Great Circle) physics.
 
 ## Live Googlesheet Dataset
-**[Open the live dataset here] (https://docs.google.com/spreadsheets/d/1SKtDtj3KX9WvE0n9iETiPS2IcNvKxSWiqhhcbqbp2xs/edit?usp=sharing)**
+**(https://docs.google.com/spreadsheets/d/1SKtDtj3KX9WvE0n9iETiPS2IcNvKxSWiqhhcbqbp2xs/edit?usp=sharing)**
 
 ## 🚀 Live Demo
 
