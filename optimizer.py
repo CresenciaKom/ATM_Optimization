@@ -77,7 +77,7 @@ class GurobiRouteSolver:
         if 'DEPOT' not in self.df['ID'].values:
             raise ValueError("DEPOT node not found in dataframe")
         
-        # Validate: Need at least one ATM to visit (DEPOT + at least 1 ATM)
+        # Validate: Need at least 1 ATM to visit (DEPOT + at least 1 ATM)
         if len(self.df) < 2:
             raise ValueError("Need at least one ATM to visit (only DEPOT found)")
         
